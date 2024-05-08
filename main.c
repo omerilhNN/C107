@@ -1,134 +1,150 @@
 #include <stdio.h>
 #include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
-#include <process.h>
-#include <windef.h>
+#include <ws2tcpip.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
 
-#pragma comment(lib, "ws2_32.lib")
-
+#pragma comment(lib, "ws2_32.lib") // Winsock Library
 #define PORT 36
-#define MAX_CLIENTS 5
-#define BUFFER_SIZE 1024
 #define IP "192.168.0.36"
+#define MAX_CLIENT 5
 
-CRITICAL_SECTION cs;
 
-DWORD WINAPI HandleClient(LPVOID client_request_ptr) {
-    char buffer[BUFFER_SIZE] = {0};
-    char* hello = "Hello from client";
-    
-    int client_request = *((int*)client_request_ptr);
-    free(client_request_ptr);
+void* clientThread(void* arg)
+{
+    printf("In thread\n");
+    char *message = "Hello from client\n";
+    char buffer[1024];
 
-    SOCKET network_socket;
-    int connection_status;
-
-    if ((network_socket = socket(AF_INET, SOCK_STREAM, 0)) == SOCKET_ERROR) {
-        printf("Socket creation failed\n");
-        return 1;
-    }
-
+    SOCKET clientSocket = *((SOCKET*)arg); 
     struct sockaddr_in server_address;
+   
+    WSADATA wsaClient;
+    if (WSAStartup(MAKEWORD(2,2),&wsaClient)!=0) {
+        printf("WSA Startup failed\n");
+        pthread_exit(NULL);
+    }
+    //Client socket oluþtur
+    if ((clientSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET) {
+        printf("Socket failed - CLIENT\n");
+        pthread_exit(NULL);
+    }
     server_address.sin_family = AF_INET;
     server_address.sin_port = htons(PORT);
 
-    if (inet_pton(AF_INET,IP,&server_address.sin_addr) <= 0) {
-        printf("Server address error\n");
-        return 0;
+    //IP atamasý yap
+    if (inet_pton(AF_INET,"192.168.0.36",&server_address.sin_addr) < 0 ) {
+        printf("Invalid IP\n");
+        pthread_exit(NULL);
     }
 
-    if (connection_status = connect(network_socket, (struct sockaddr*)&server_address, sizeof(server_address)) < 0) {
-        printf("Error\n");
-        return 0;
+    //Client soketi, bu server addresine baðlama iþlemini yap
+    if (connect(clientSocket,(struct sockaddr*) &server_address,sizeof(server_address)) == SOCKET_ERROR) {
+        printf("Connection to server failed\n");
+        closesocket(clientSocket);
+        pthread_exit(NULL);
     }
+    *(SOCKET*)arg = clientSocket;
 
-    printf("Connection established\n");
+    ////send message from client to server
+    //if (send(clientSocket, message, sizeof(message), 0) < 0)
+    //{
+    //    printf("Send failed\n");
+    //}
 
-    if (send(network_socket, (char*)hello, sizeof(hello), 0) < 0 ) {
-        printf("Send failed");
-        return 0;
-    }
-    if (recv(network_socket, buffer, 1024, 0) < 0)
-    {
-        printf("Receive failed\n");
-    }
-    printf("Client %d message: %s", network_socket, buffer);
+    //// Receive message from server to buffer
+    //if (recv(clientSocket, buffer, 1024, 0) < 0)
+    //{
+    //    printf("Receive failed\n");
+    //}
 
-    closesocket(network_socket);
+    // Print the received message
+    //printf("Data received: %s\n", buffer);
 
-    return 0;
+    WSACleanup();
+    return arg;
 }
 
-int main() {
-    WSADATA wsa;
-    SOCKET master_socket;
-    struct sockaddr_in server_address;
-    int client_request;
+int main()
+{
+    int i = 0;
+    char buffer[1024];
+    pthread_t tid[MAX_CLIENT];
+    SOCKET serverSocket,clientSockets[MAX_CLIENT],newSocket; // Server socket tanýmlamasý
+    struct sockaddr_in serverAddr;
+    int serverAddrLen = sizeof(serverAddr);
+
 
     // Initialize Winsock
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        printf("WSAStartup failed\n");
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
+    {
+        printf("WSAStartup failed.\n");
         return 1;
     }
 
-    // Create master socket
-    if ((master_socket = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) {
-        printf("socket failed\n");
+    // Create the server socket.
+    serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (serverSocket == INVALID_SOCKET)
+    {
+        printf("Socket creation failed.\n");
         return 1;
     }
 
-    // Initialize server address
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(PORT);
-    if (inet_pton(AF_INET,IP,&server_address.sin_addr) <= 0) {
+    // Configure settings of the server address
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(PORT);
+
+    if (inet_pton(AF_INET,"192.168.0.36",&serverAddr.sin_addr) < 0 ) {
         printf("Invalid IP\n");
         return 1;
     }
 
-    // Bind master socket
-    if (bind(master_socket, (struct sockaddr*)&server_address, sizeof(server_address)) == SOCKET_ERROR) {
-        printf("bind failed\n");
+    // Bind the server socket
+    if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR)
+    {
+        printf("Bind failed.\n");
         return 1;
     }
 
-    // Listen
-    if (listen(master_socket, MAX_CLIENTS) == SOCKET_ERROR) {
-        printf("listen failed\n");
+    // Listen on the server socket
+    if (listen(serverSocket, 1) == SOCKET_ERROR)
+    {
+        printf("Listen failed.\n");
         return 1;
     }
 
-    printf("Waiting for connections...\n");
+    // Accept incoming connections and handle them
+    while (1)
+    {
+        for (int i = 0; i < MAX_CLIENT; i++) {
+            if ((newSocket = accept(serverSocket, (struct sockaddr*)&serverAddr, &serverAddrLen)) == INVALID_SOCKET)
+            {
+                printf("Accept failed.\n");
+                return 1;
+            }
+            clientSockets[i] = newSocket;
 
-    while (1) {
-        SOCKET new_socket;
-        struct sockaddr_in client_address;
-        int client_addrlen = sizeof(client_address);
-
-        // Accept connection
-        if ((new_socket = accept(master_socket, (struct sockaddr*)&client_address, &client_addrlen)) == INVALID_SOCKET) {
-            printf("accept failed\n");
-            return 1;
+            if (pthread_create(&tid[i], NULL, &clientThread, (void*)&clientSockets[i]) != 0)
+                printf("Failed to create thread\n");
         }
-
-        printf("New connection, socket fd is %d\n", new_socket);
-
-        // Assuming client sends an integer request
-        recv(new_socket, (char*)&client_request, sizeof(client_request), 0);
-
-        // Create a thread for handling client request
-        HANDLE thread_handle = CreateThread(NULL, 0, &HandleClient, (LPVOID)&client_request, 0, NULL);
-        if (thread_handle == NULL) {
-            printf("Failed to create thread\n");
-            closesocket(new_socket);
-        }
-        else {
-            printf("Thread created successfully\n");
-            CloseHandle(thread_handle);
+        for (int j = 0; j < MAX_CLIENT; j++) {
+            if (pthread_join(tid[j],(void**)&clientSockets[j]) != 0) {
+                printf("Failed to join thread\n");
+            }
+            if (recv(clientSockets[j],buffer,1024,0) < 0) {
+                printf("Receive failed\n");
+            }
+            printf("Data %s for socket fd %d", buffer,clientSockets[j]);
         }
     }
 
-    closesocket(master_socket);
+
+    // Close the server socket
+    closesocket(serverSocket);
+
     WSACleanup();
 
     return 0;
