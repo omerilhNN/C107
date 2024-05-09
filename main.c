@@ -15,35 +15,34 @@ typedef struct {
     char buffer[BUFFER_SIZE];
 } ClientInfo;
 
-// Function to handle client requests
-DWORD WINAPI handleClient(LPVOID lpParameter) {
-    ClientInfo* clientInfo = (ClientInfo*)lpParameter;
-    SOCKET socket = clientInfo->socket;
+
+// DWORD - 32 bitlik Unsigned long deðeri WINAPI fonksiyonu olarak çaðýrýlmasý gerektiðinde
+//LPVOID - long pointer to void -> void* handleClient((void* )arg)
+DWORD WINAPI handleClient(LPVOID arg) {
+    ClientInfo* client = (ClientInfo*)arg;
+    SOCKET socket = client->socket;
 
     while (1) {
-        int bytesReceived = recv(socket, clientInfo->buffer, BUFFER_SIZE, 0);
-        if (bytesReceived > 0) {
-            // Process client request
-            printf("Received message from client: %s\n", clientInfo->buffer);
+        //soketten okunan byteý dönderir
+        int bytesReceived = recv(socket,client->buffer,BUFFER_SIZE,0);
+        if (bytesReceived  > 0) {
+            client-> buffer[bytesReceived] = '\0';
+            printf("Received message: %s client fd: %d\n", client->buffer,socket);
 
-            // Send response back to client
             char* response = "Hello from server!";
-            send(socket, response, strlen(response), 0);
+            send(socket, response, sizeof(response), 0);
         }
         else {
             break;
         }
     }
-
     closesocket(socket);
-    free(clientInfo);
-    return 0;
+    free(client);
+    return NULL;
 }
 
 int main() {
-    // Initialize Winsock
     WSADATA wsaData;
-    SOCKET listenSocket,clientSocket;
   
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         printf("WSAStartup failed");
@@ -51,7 +50,8 @@ int main() {
     }
 
     // Server'ýn socketini oluþtur
-    if ((listenSocket = socket(AF_INET,SOCK_STREAM,IPPROTO_TCP)) == INVALID_SOCKET) {
+    SOCKET listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listenSocket == INVALID_SOCKET) {
         printf("server_socket failed: %ld\n", WSAGetLastError());
         WSACleanup();
         return 1;
@@ -62,7 +62,7 @@ int main() {
     serverAddress.sin_port = htons(PORT);
 
     //IF inet_pton == 0 -> IP geçersiz ancak iþlev baþarýlý
-    if (inet_pton(AF_INET, "192.168.0.36", &serverAddress.sin_addr) < 0) {
+    if (inet_pton(AF_INET, "192.168.123.9", &serverAddress.sin_addr) < 0) {
         printf("Invalid IP\n");
         return 1;
     }
@@ -87,16 +87,19 @@ int main() {
     printf("Server listening on port %d...\n", PORT);
 
     while (1) {
-        // Accept ile gelen isteði kabul et clientSocket'e atamasýný yap.
-        if ((clientSocket = accept(listenSocket, NULL, NULL) )== INVALID_SOCKET) {
+        // Accept ile gelen isteði kabul et ve clientSocket oluþtur.
+        //Client'ýn adresini bilmemize gerek olmadýðý için NULL parametreleri verildi
+        SOCKET clientSocket = accept(listenSocket, NULL, NULL);
+        if (clientSocket== INVALID_SOCKET) {
             printf("accept failed: %ld\n", WSAGetLastError());
             continue;
         }
 
-        // Create a new thread to handle client requests
+        // kendisine ait buffer ve sockete sahip ClientInfo struct'ý oluþtur
         ClientInfo* clientInfo = (ClientInfo*)malloc(sizeof(ClientInfo));
         clientInfo->socket = clientSocket;
 
+        //Thread ve Process iþlemlerinde HANDLE kullan.
         HANDLE hThread = CreateThread(NULL, 0, handleClient, clientInfo, 0, NULL);
         if (hThread == NULL) {
             printf("CreateThread failed: %ld\n", GetLastError());
@@ -107,7 +110,6 @@ int main() {
 
         // Close the thread handle
         CloseHandle(hThread);
-        free(clientInfo);
     }
 
 
